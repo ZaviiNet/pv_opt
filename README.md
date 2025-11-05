@@ -115,6 +115,10 @@ https://github.com/fboundy/pv_opt/blob/main/files/solis_hybrid.yaml
 Note: installs using https://github.com/StephanJoubert/home_assistant_solarman have writes to the inverter disabled. For full inverter control, reinstall using the Solarman repo
 above.
 
+<h5>Pho3niX90 solis-modbus</h5>
+
+Follow Github instruction here: https://github.com/Pho3niX90/solis_modbus
+
 <h3>6. Install the MQTT Integraion in Home Assistant</h3>
 
 1. Click on the button below to add the MQTT integration:
