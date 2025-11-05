@@ -272,6 +272,35 @@ pv_opt:
   #   - sensor.{device_name}_pv_power_1
   #   - sensor.{device_name}_pv_power_2
 
+  # ===============================================================================================================
+  # Brand / Integration Specific Config: SOLIS_PHO3NIX_MODBUS: https://github.com/pho3nix90/solis_modbus
+  # ===============================================================================================================
+  #
+  # Uncomment and configure this section if using the pho3nix90/solis_modbus integration.
+  # This integration uses 'time' entities for control and is recommended for inverters
+  # that do not respond to the 'SOLIS_SOLAX_MODBUS' (wills106) driver.
+  #
+  # All 'id_*' sensor entities (like id_battery_soc) will be inherited from the
+  # SOLIS_SOLAX_MODBUS defaults, as the names are typically identical.
+
+  # inverter_type: SOLIS_PHO3NIX_MODBUS
+  # device_name: solis   # Or whatever prefix you set in the integration
+
+  # --- Inverter Control Entities (MUST BE DEFINED) ---
+
+  # 1. The main inverter mode switch
+  # id_inverter_mode: select.{device_name}_energy_storage_control_switch
+
+  # 2. The 'time' entities for charge/discharge slots (UNIQUE to this integration)
+  # id_timed_charge_start: time.{device_name}_timed_charge_start
+  # id_timed_charge_end: time.{device_name}_timed_charge_end
+  # id_timed_discharge_start: time.{device_name}_timed_discharge_start
+  # id_timed_discharge_end: time.{device_name}_timed_discharge_end
+
+  # 3. The current limit entities (must match your pho3nix90 entities)
+  # id_timed_charge_current: number.{device_name}_timed_charge_current
+  # id_timed_discharge_current: number.{device_name}_timed_discharge_current
+
 
   # ==============================================================================================================
   # Brand / Integration Specific Config: SOLIS_CORE_MODBUS: https://github.com/fboundy/ha_solis_modbus
@@ -466,6 +495,10 @@ pv_opt:
   # id_timed_charge_button: button.{device_name}_update_timed_charge_1
   # id_timed_discharge_button: button.{device_name}_update_timed_discharge_1
   # id_timed_charge_discharge_button: button.{device_name}_update_timed_charge_discharge_1
+
+
+
+
 
   # Tariff comparison
   # id_daily_solar: sensor.{device_name}_power_generation_today

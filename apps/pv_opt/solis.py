@@ -328,6 +328,11 @@ def create_inverter_controller(inverter_type: str, host):
             inverter_type=inverter_type,
             host=host,
         )
+    elif inverter_type == "SOLIS_PH03NIX_MODBUS":
+        return SolisPho3nixModbus(
+                inverter_type=inverter_type,
+                host=host,
+        )
 
     else:
         host.log(f"Unknown inverter type {inverter_type}")
@@ -930,3 +935,106 @@ class SolisSolarmanModbusInverter(SolisInverter):
             data = {"register": register, "value": value}
             self._host.call_service("solarman/write_holding_register", **data)
             written = True
+
+
+class SolisPho3nixModbus(SolisSolaxModbusInverter):
+    """
+    Inverter controller for the pho3nix90/solis_modbus integration.
+    This integration differs from wills106/homeassistant-solax-modbus by:
+    1. Using `time.set_value` service instead of number/button entities.
+    2. Requiring "Timed Charge/Discharge" (Code 35) to be active.
+    """
+
+    def __init__(self, inverter_type, host):
+        # Initialize the parent class (SolisSolaxModbusInverter)
+        super().__init__(inverter_type, host)
+        self.app.log("SolisPho3nixModbus driver initialised.")
+
+        # Override the HMI flag from the parent.
+        # We know this integration *must* use Code 35 ("Timed Charge/Discharge")
+        # which is what hmi_firmware_fb00_plus = False enables.
+        self._hmi_fb00 = False
+        self.log(f"HMI Firmware Flag forced to {self._hmi_fb00} for this driver.")
+
+        # This integration does not use a "submit" button.
+        self._requires_button_press = False
+
+    def enable_timed_mode(self):
+        """
+        Forces the inverter into "Timed Charge/Discharge" (Code 35).
+        This is required for the pho3nix90 integration to work.
+        """
+        mode = self.modes.get("Timed Charge/Discharge")
+        if mode:
+            self.app.log(f"Setting inverter mode to 'Timed Charge/Discharge' ({mode})")
+            self.app.select_option(self.mode_control_entity, mode)
+        else:
+            self.app.log(
+                "Could not find 'Timed Charge/Discharge' mode in modes list",
+                level="ERROR",
+            )
+
+    def disable_timed_mode(self):
+        """
+        Sets the inverter back to "Self-Use" (Code 33).
+        """
+        mode = self.modes.get("Self-Use")
+        if mode:
+            self.app.log(f"Setting inverter mode to 'Self-Use' ({mode})")
+            self.app.select_option(self.mode_control_entity, mode)
+        else:
+            self.app.log(
+                "Could not find 'Self-Use' mode in modes list", level="ERROR"
+            )
+
+    def _set_times(self, direction, **times) -> bool:
+        """
+        Sets the inverter charge/discharge times using the `time.set_value` service,
+        which is used by the pho3nix90/solis_modbus integration.
+        """
+        value_changed = False
+        start_time = times.get("start", None)
+        end_time = times.get("end", None)
+
+        if start_time is None or end_time is None:
+            self.app.log(f"Missing start or end time for _set_times in {direction}", level="WARNING")
+            return False
+
+        # Solis inverters can't cope with time slots spanning midnight
+        if start_time.day != end_time.day:
+            end_time = end_time.floor("1D") - pd.Timedelta("1min")
+
+        try:
+            # --- This is the key change ---
+            # Convert to HH:MM:SS strings
+            start_time_str = start_time.strftime("%H:%M:%S")
+            end_time_str = end_time.strftime("%H:%M:%S")
+
+            # Get the entity IDs (e.g., time.solis_timed_charge_start)
+            start_entity = self._host.config.get(f"id_timed_{direction}_start", None)
+            end_entity = self._host.config.get(f"id_timed_{direction}_end", None)
+
+            if not (start_entity and end_entity):
+                self.app.log(f"Missing time entities for {direction} in config!", level="ERROR")
+                return False
+
+            self.app.log(f"Calling time/set_value on {start_entity} with {start_time_str}")
+            changed_start, written_start = self.write_to_hass(
+                entity_id=start_entity, value=start_time_str, verbose=True
+            )
+
+            self.app.log(f"Calling time/set_value on {end_entity} with {end_time_str}")
+            changed_end, written_end = self.write_to_hass(
+                entity_id=end_entity, value=end_time_str, verbose=True
+            )
+
+            value_changed = (changed_start and written_start) or (changed_end and written_end)
+
+        except Exception as e:
+            self.app.log(
+                f"ERROR setting charge time via time.set_value: {e}. "
+                f"Check config for id_timed_{direction}_start/end.",
+                level="ERROR",
+            )
+
+        return value_changed
