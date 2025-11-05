@@ -115,7 +115,7 @@ https://github.com/fboundy/pv_opt/blob/main/files/solis_hybrid.yaml
 Note: installs using https://github.com/StephanJoubert/home_assistant_solarman have writes to the inverter disabled. For full inverter control, reinstall using the Solarman repo
 above.
 
-<h5>Pho3niX90 solis-modbus</h5>
+<h4>Pho3niX90 solis-modbus</h4>
 
 Follow Github instruction here: https://github.com/Pho3niX90/solis_modbus
 
