@@ -8,6 +8,7 @@ The application will integrate fully with Solis inverters which are controlled u
 -   [Home Assistant Core Modbus Integration](https://github.com/fboundy/ha_solis_modbus)
 -   [Home Assistant Solis Sensor Integration](https://github.com/hultenvp/solis-sensor)
 -   [Home Assistant Solarman Integration](https://github.com/davidrapan/ha-solarman) (1)
+-   [Home Assistant Solis Modbus Integration](https://github.com/Pho3niX90/solis_modbus)
 
 (1) https://github.com/StephanJoubert/home_assistant_solarman appears to be no longer maintained so has been replaced with
 https://github.com/davidrapan/ha-solarman. This should be used for new installs for PvOpt v4.0.0 onwards.
