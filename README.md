@@ -361,6 +361,55 @@ The `config.yaml` file also includes all the other configuration used by PV Opt.
 
     overwrite_ha_on_restart: true
 
+<h3>Database Configuration (Optional)</h3>
+
+For improved performance and long-term data storage, PV Opt can be configured to log its detailed output data (like the 30-minute optimised plan) to a database instead of storing it in Home Assistant state attributes. This is highly recommended for users who want to perform long-term analysis or use tools like Grafana for visualization, as it significantly reduces the load on Home Assistant's own database.
+
+When enabled, sensor attributes in Home Assistant (e.g., `sensor.pvopt_opt_cost`) will contain minimal summary data, while the full time-series data is sent to your chosen database.
+
+To enable this feature, add and uncomment the `database` section in your `config.yaml` file.
+
+<h4>InfluxDB</h4>
+
+InfluxDB is a powerful time-series database perfect for handling the data from PV Opt.
+
+1.  **Configure `config.yaml`:**
+
+    ```yaml
+    database:
+      enabled: true
+      type: influxdb
+      host: core-influxdb # Or the IP/hostname of your InfluxDB instance
+      port: 8086
+      database: pv_opt # Your InfluxDB bucket name
+      token: !secret influx_token # Your InfluxDB token
+      org: !secret influx_org # Your InfluxDB organization
+    ```
+
+2.  **Add Python Package:** You must also add the `influxdb-client` package to your AppDaemon configuration. In the AppDaemon Add-on configuration, under "Edit in YAML", add it to `python_packages`:
+
+    ```yaml
+    python_packages:
+      - pandas
+      - numpy==1.26.4
+      - influxdb-client
+    ```
+
+<h4>SQLite</h4>
+
+SQLite provides a simple, file-based database that requires no separate server. It's an excellent option for easy setup or for testing purposes, though it may not be suitable for extremely large, long-term datasets.
+
+To use SQLite, configure your `config.yaml` as follows. No additional Python packages are needed.
+
+```yaml
+database:
+  enabled: true
+  type: sqlite
+  # The 'database' path is optional. If omitted, it defaults to a file
+  # named 'pv_opt.db' inside the pv_opt app directory.
+  database: /config/appdaemon/apps/pv_opt/pv_opt.db
+```
+
 <b><i>PV_Opt</b></i> needs to know the size of your battery and the power of your inverter: both when inverting battery to AC power and when chargingh tha battery. It will attempt to work these out from the data it has loaded (WIP) but you should check the following enitities in Home Assistant:
 
 <h3>System Parameters</h3>

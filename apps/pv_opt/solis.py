@@ -592,7 +592,8 @@ class SolisInverter(BaseInverterController):
 
         else:
             # Disable by setting end time = start time:
-            times["start"] = self.status["charge"]["start"]
+            # To disable, set both start and end times to midnight.
+            times["start"] = pd.Timestamp.now(tz=self._tz).normalize()
             times["end"] = times["start"]
             current = 0
             target_soc = None

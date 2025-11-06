@@ -531,6 +531,107 @@ DEFAULT_CONFIG = {
     },
 }
 
+class DatabaseManager:
+    def __init__(self, host_app, db_config):
+        self.host = host_app
+        self.config = db_config
+        self.client = None
+        self.write_api = None
+        self.query_api = None
+
+        if self.config.get("enabled"):
+            self.host.log("Database is enabled. Attempting to connect.")
+            self._connect()
+
+    def _connect(self):
+        db_type = self.config.get("type")
+        if db_type == "influxdb":
+            try:
+                # Note: You would need to add 'influxdb-client' to your python_packages
+                from influxdb_client import InfluxDBClient
+                from influxdb_client.client.write_api import SYNCHRONOUS
+
+                self.client = InfluxDBClient(
+                    url=f"http://{self.config['host']}:{self.config['port']}",
+                    token=self.config.get("token"),
+                    org=self.config.get("org")
+                )
+                self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
+                self.query_api = self.client.query_api()
+                self.host.log("Successfully connected to InfluxDB.")
+            except Exception as e:
+                self.host.log(f"Failed to connect to InfluxDB: {e}", level="ERROR")
+                self.client = None
+        elif db_type == "sqlite":
+            try:
+                import sqlite3
+                # Default to a file in the config directory if not specified
+                db_path = self.config.get("database", "/config/appdaemon/apps/pv_opt/pv_opt.db")
+                self.client = sqlite3.connect(db_path, check_same_thread=False)
+                self.host.log(f"Successfully connected to SQLite database at {db_path}.")
+            except Exception as e:
+                self.host.log(f"Failed to connect to SQLite: {e}", level="ERROR")
+                self.client = None
+        else:
+            self.host.log(f"Database type '{db_type}' is not yet supported.", level="WARNING")
+
+    def write_df(self, measurement, df, tags={}):
+        if not self.write_api:
+            return
+
+        db_type = self.config.get("type")
+        if db_type == "influxdb":
+            try:
+                self.host.log(f"Writing data to InfluxDB measurement: {measurement}")
+                self.write_api.write(
+                    bucket=self.config.get("database"),
+                    record=df,
+                    data_frame_measurement_name=measurement,
+                    data_frame_tag_columns=list(tags.keys())
+                )
+            except Exception as e:
+                self.host.log(f"Failed to write to InfluxDB: {e}", level="ERROR")
+        elif db_type == "sqlite":
+            try:
+                self.host.log(f"Writing data to SQLite table: {measurement}")
+                # The DataFrame's index (timestamp) will be saved as a column named 'index' by default
+                df.to_sql(measurement, self.client, if_exists='append', index=True)
+            except Exception as e:
+                self.host.log(f"Failed to write to SQLite: {e}", level="ERROR")
+
+    def read_data(self, query):
+        if not self.client:
+            return None
+
+        db_type = self.config.get("type")
+        if db_type == "influxdb":
+            try:
+                self.host.log(f"Querying data from InfluxDB.")
+                result = self.query_api.query_data_frame(query, org=self.config.get("org"))
+                return result
+            except Exception as e:
+                self.host.log(f"Failed to query from InfluxDB: {e}", level="ERROR")
+                return None
+        elif db_type == "sqlite":
+            try:
+                self.host.log(f"Querying data from SQLite with: {query}")
+                return pd.read_sql_query(query, self.client, index_col='index', parse_dates=['index'])
+            except Exception as e:
+                self.host.log(f"Failed to query from SQLite: {e}", level="ERROR")
+                return None
+
+    def write_config(self, config_dict):
+        if not self.write_api:
+            return
+        # Implementation to write key-value config to a 'config' measurement
+        # This would be a simple point for each config item.
+        pass
+
+    def read_config(self):
+        if not self.query_api:
+            return {}
+        # Implementation to read the latest value for each config item.
+        return {}
 
 def importName(modulename, name):
     """Import a named object from a module in the context of this function."""
@@ -579,6 +680,9 @@ class PVOpt(hass.Hass):
         self.adapi = self.get_ad_api()
         self.mqtt = self.get_plugin_api("MQTT")
         self._load_tz()
+
+        self.db_manager = DatabaseManager(self, self.args.get("database", {}))
+
         self.log(f"Time Zone Offset: {self.get_tz_offset()} minutes")
 
         # self.log(self.args)

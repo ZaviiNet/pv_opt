@@ -61,6 +61,25 @@ pv_opt:
   debug_categories: W
 
   # ========================================
+  # Database configuration (Optional)
+  # ========================================
+  #
+  # database:
+  #   enabled: true
+  #   type: influxdb # Or sqlite, mariadb, postgresql
+  #
+  #   # For InfluxDB
+  #   host: core-influxdb
+  #   port: 8086
+  #   database: pv_opt
+  #   token: !secret influx_token
+  #   org: !secret influx_org
+  #
+  #   # For SQLite (path is optional, defaults to a file in the app directory)
+  #   # database: /config/appdaemon/apps/pv_opt/pv_opt.db
+
+
+  # ========================================
   # Basic parameters
   # ========================================
   read_only: false # If true the inverter will not be controlled
@@ -517,4 +536,3 @@ pv_opt:
     - name: Flux
       octopus_import_tariff_code: E-1R-FLUX-IMPORT-23-02-14-G
       octopus_export_tariff_code: E-1R-FLUX-EXPORT-23-02-14-G
-
