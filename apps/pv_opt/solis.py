@@ -9,7 +9,6 @@ LIMITS = ["start", "end"]
 DIRECTIONS = ["charge", "discharge"]
 TIME_UNITS = ["hours", "minutes"]
 
-
 URLS = {
     "root": "https://www.soliscloud.com:13333",
     "login": "/v2/api/login",
@@ -92,9 +91,33 @@ SOLIS_BITS = [
     "FeedInPriority",
 ]
 
-
 TIMEFORMAT = "%H:%M"
 INVERTER_DEFS = {
+    "SOLIS_PHO3NIX_MODBUS": {
+        "online": "sensor.{device_name}_overdischarge_soc",
+        "codes": SOLIS_DEFAULT_CODES,
+        "default_config": {
+            "maximum_dod_percent": "sensor.{device_name}_overdischarge_soc",
+            "id_battery_soc": "sensor.{device_name}_battery",
+            "id_consumption_today": "sensor.{device_name}_today_load_consumption",
+            "id_grid_power": "sensor.{device_name}_meter_active_power",
+            "id_grid_import_today": "sensor.{device_name}_today_energy_import",
+            "id_grid_export_today": "sensor.{device_name}_today_energy_export",
+            "id_inverter_ac_power": "sensor.{device_name}_inverter_ac_power",
+            "supports_hold_soc": True,
+            "supports_forced_discharge": True,
+            "update_cycle_seconds": 60,
+        },
+        "brand_config": {
+             "battery_voltage": "sensor.{device_name}_battery_voltage",
+             "id_timed_charge_start": "time.{device_name}_grid_time_of_use_charge_start_slot_1",
+             "id_timed_charge_end": "time.{device_name}_grid_time_of_use_charge_end_slot_1",
+             "id_timed_charge_current": "number.{device_name}_grid_time_of_use_charge_battery_current_slot_1",
+             "id_timed_charge_switch": "switch.{device_name}_grid_time_of_use_charging_period_1",
+             "id_inverter_mode": "select.{device_name}_storage_control_mode",
+             "id_backup_mode_soc": "sensor.{device_name}_backup_mode_soc",
+         },
+    },
     "SOLIS_SOLAX_MODBUS": {
         "online": "number.{device_name}_battery_minimum_soc",
         "codes": SOLIS_DEFAULT_CODES,
@@ -107,12 +130,6 @@ INVERTER_DEFS = {
             "GridCharge",
             "FeedInPriority",
         ],
-        # Default Configuration: Exposed as inverter.config and provides defaults for this inverter for the
-        # required config. These config items can be over-written by config specified in the config.yaml
-        # file. They are required for the main PV_Opt module and if they cannot be found an ERROR will be
-        # raised
-        # house_load_x and _bypass_load_x are not the defaults for Solax.
-        # This is probably intentional, as the datafiles are large and loading kWh is preferred
         "default_config": {
             "maximum_dod_percent": "number.{device_name}_battery_minimum_soc",
             "id_battery_soc": "sensor.{device_name}_battery_soc",
@@ -129,8 +146,6 @@ INVERTER_DEFS = {
             "supports_forced_discharge": True,
             "update_cycle_seconds": 15,
         },
-        # Brand Conguration: Exposed as inverter.brand_config and can be over-written using arguments
-        # from the config.yaml file but not rquired outside of this module
         "brand_config": {
             "battery_voltage": "sensor.{device_name}_battery_voltage",
             "id_timed_charge_on": "switch.{device_name}_timed_charge_slot_1_enable",
@@ -328,11 +343,15 @@ def create_inverter_controller(inverter_type: str, host):
             inverter_type=inverter_type,
             host=host,
         )
-    elif inverter_type == "SOLIS_PH03NIX_MODBUS":
+
+    # --- NEW CODE START ---
+    # This block adds support for the pho3nix90/solis_modbus integration
+    elif inverter_type == "SOLIS_PHO3NIX_MODBUS":
         return SolisPho3nixModbus(
-                inverter_type=inverter_type,
-                host=host,
+            inverter_type=inverter_type,
+            host=host,
         )
+    # --- NEW CODE END ---
 
     else:
         host.log(f"Unknown inverter type {inverter_type}")
@@ -350,19 +369,27 @@ class BaseInverterController(ABC):
         self._device_name = self._host.device_name
         self._config = {}
         self._brand_config = {}
-        self._online = INVERTER_DEFS[self._type]["online"].replace("{device_name}", self._device_name)
-        for defs, conf in zip(
-            [INVERTER_DEFS[self._type][x] for x in ["default_config", "brand_config"]],
-            [self._config, self._brand_config],
-        ):
-            for item in defs:
-                if isinstance(defs[item], str):
-                    conf[item] = defs[item].replace("{device_name}", self._device_name)
-                elif isinstance(defs[item], list):
-                    conf[item] = [z.replace("{device_name}", self._device_name) for z in defs[item]]
+
+        all_defs = INVERTER_DEFS[self._type]
+        self._online = self._format_entity_id(all_defs["online"])
+
+        for def_name, conf_dict in zip(["default_config", "brand_config"], [self._config, self._brand_config]):
+            for item, template in all_defs.get(def_name, {}).items():
+                if isinstance(template, str):
+                    conf_dict[item] = self._format_entity_id(template)
+                elif isinstance(template, list):
+                    conf_dict[item] = [self._format_entity_id(t) for t in template]
                 else:
-                    conf[item] = defs[item]
+                    conf_dict[item] = template
+        
         self.log(f"Loading controller for inverter type {self._type}")
+
+    def _format_entity_id(self, template: str) -> str:
+        """Format the entity ID, handling the device_name placeholder correctly."""
+        if self._device_name:
+            return template.replace("{device_name}", self._device_name)
+        else:
+            return template.replace("{device_name}_", "")
 
     @property
     @abstractmethod
@@ -391,7 +418,10 @@ class BaseInverterController(ABC):
         pass
 
     def get_config(self, config_variable, default=None):
-        return self._host.get_config(config_variable, default)
+        default_from_config = self.config.get(config_variable)
+        if default_from_config is None:
+            default_from_config = self.brand_config.get(config_variable, default)
+        return self._host.get_config(config_variable, default_from_config)
 
     @property
     @abstractmethod
@@ -415,10 +445,6 @@ class BaseInverterController(ABC):
         if isinstance(value, int) or isinstance(value, float):
             return self._host.write_and_poll_value(entity_id=entity_id, value=value, **kwargs)
         else:
-            # self.log("write_to_hass - time detected")
-            # var_type = type(value)
-            # self.log(f"value = {value}")
-            # self.log(f"type of value = {var_type}")
             try:
                 return self._host.write_and_poll_time(entity_id=entity_id, time=value, verbose=True)
             except:
@@ -459,9 +485,9 @@ class SolisInverter(BaseInverterController):
     def timed_mode(self):
         if self._hmi_fb00:
             timed_mode = (
-                self._get_slot_status(direction="charge")
-                and self._get_slot_status(direction="discharge")
-                and int(self._get_energy_control_code()) == 33
+                    self._get_slot_status(direction="charge")
+                    and self._get_slot_status(direction="discharge")
+                    and int(self._get_energy_control_code()) == 33
             )
             return timed_mode
         else:
@@ -517,19 +543,19 @@ class SolisInverter(BaseInverterController):
         for direction in DIRECTIONS:
             status[direction]["power"] = status[direction]["current"] * voltage
             status[direction]["active"] = (
-                time_now >= status[direction]["start"]
-                and time_now < status[direction]["end"]
-                and status[direction].get("current", 0)
-                >= 0  # SVB changed to ">=" so IOG slots are seen as charging (as they effectively use timed charge
-                and (self._hmi_fb00 or status["switches"].get("Timed", False))
-                and status["switches"].get("GridCharge", False)
+                    time_now >= status[direction]["start"]
+                    and time_now < status[direction]["end"]
+                    and status[direction].get("current", 0)
+                    >= 0  # SVB changed to ">=" so IOG slots are seen as charging (as they effectively use timed charge
+                    and (self._hmi_fb00 or status["switches"].get("Timed", False))
+                    and status["switches"].get("GridCharge", False)
             )
         status["hold_soc"] = self._hold_soc
 
         return status
 
     def _switches(self, code):
-        return {bit: (code & 2**i == 2**i) for i, bit in enumerate(self._bits)}
+        return {bit: (code & 2 ** i == 2 ** i) for i, bit in enumerate(self._bits)}
 
     @property
     def is_online(self):
@@ -561,10 +587,6 @@ class SolisInverter(BaseInverterController):
             times["start"] = kwargs.get("start", None)
             times["end"] = kwargs.get("end", None)
             current = kwargs.get("current", abs(round(kwargs.get("power", 0) / self.voltage, 1)))
-           
-            # SVB debugging
-            # self.log(f"Voltage in solis.py = {self.voltage}") 
-            # self.log(f"Current in solis.py = {current}")
 
             target_soc = kwargs.get("target_soc", None)
 
@@ -611,12 +633,7 @@ class SolisInverter(BaseInverterController):
                     self._press_button(entity_id=entity_id)
                     self.log("Times have changed - press Update Charge/Discharge Times Button")
 
-
         if self._hmi_fb00:
-            """
-            There seems to be a bug where with the FB00+ firmware the changes aren't saved unless
-            the target SOC is also set
-            """
             if changed or (self.status[direction].get("soc", 0) != target_soc):
                 self._set_target_soc(direction, target_soc, forced=True)
 
@@ -658,23 +675,19 @@ class SolisInverter(BaseInverterController):
 
     def _set_times(self, direction, **times) -> bool:
         value_changed = False
-        # Solis inverters can't cope with time slots spanning midnight so if the end is a different day
-        # crop it to 23:59
-
         if times["end"] is not None:
             if times["start"] is None:
                 start_day = pd.Timestamp.now().day
             else:
                 start_day = times["start"].day
 
-            # if times["end"].day != times["start"].day:
             if start_day != times["end"].day:
                 times["end"] = times["end"].floor("1D") - pd.Timedelta("1min")
 
         for limit in LIMITS:
             time = times.get(limit, None)
             if time is not None:
-                entity_id = self._host.config.get(f"id_timed_{direction}_{limit}", None)
+                entity_id = self.brand_config.get(f"id_timed_{direction}_{limit}", None)
                 if entity_id is not None:
                     changed, written = self.write_to_hass(entity_id=entity_id, value=time, verbose=True)
                     value_changed = value_changed or written
@@ -682,16 +695,14 @@ class SolisInverter(BaseInverterController):
         return value_changed
 
     def _set_current(self, direction, current: float = 0) -> bool:
-        entity_id = self._host.config.get(f"id_timed_{direction}_current", None)
-   
+        entity_id = self.brand_config.get(f"id_timed_{direction}_current", None)
+
         power_tolerance = float(self.get_config(f"forced_power_group_tolerance", 0.1))
         current_tolerance = round(power_tolerance / self.voltage, 2)
-        
-        # SVB debugging
-        # self.log(f"Current tolerance is {current_tolerance}A")
 
         if entity_id is not None:
-            changed, written = self.write_to_hass(entity_id=entity_id, value=current, tolerance=current_tolerance, verbose=True)
+            changed, written = self.write_to_hass(entity_id=entity_id, value=current, tolerance=current_tolerance,
+                                                  verbose=True)
 
         if changed:
             if written:
@@ -704,7 +715,7 @@ class SolisInverter(BaseInverterController):
         return not (changed and not written)
 
     def _set_target_soc(self, direction, target_soc: int = 100, forced=True) -> bool:
-        entity_id = self._host.config.get(f"id_timed_{direction}_soc", None)
+        entity_id = self.brand_config.get(f"id_timed_{direction}_soc", None)
         if forced:
             tolerance = -1
         else:
@@ -739,7 +750,7 @@ class SolisSolarmanV2Inverter(SolisInverter):
         self._requires_button_press = False
 
     def _set_current(self, direction, current: float = 0) -> bool:
-        entity_id = self._host.config.get(f"id_timed_{direction}_current", None)
+        entity_id = self.brand_config.get(f"id_timed_{direction}_current", None)
 
         current = round(current, 1)
 
@@ -749,7 +760,8 @@ class SolisSolarmanV2Inverter(SolisInverter):
         self.log(f"Current tolerance is {current_tolerance}A")
 
         if entity_id is not None:
-            changed, written = self.write_to_hass(entity_id=entity_id, value=current, tolerance=current_tolerance, verbose=True)
+            changed, written = self.write_to_hass(entity_id=entity_id, value=current, tolerance=current_tolerance,
+                                                  verbose=True)
 
         if changed:
             if written:
@@ -768,10 +780,10 @@ class SolisSolaxModbusInverter(SolisInverter):
         entity_id = self.brand_config["id_inverter_mode"]
         entity_modes = self._host.get_state_retry(entity_id, attribute="options")
         self._codes = INVERTER_DEFS[inverter_type]["codes"][self._hmi_fb00]
-        self._modes = {self._codes[code]: code for code in entity_modes}
+        if entity_modes:
+            self._modes = {self._codes[code]: code for code in entity_modes if code in self._codes}
 
     def _get_times_current(self, direction):
-        # Required if the times are set as separate_hours and units
         times = {}
         for limit in LIMITS:
             x = {unit: self.get_config(f"id_timed_{direction}_{limit}_{unit}", 0) for unit in TIME_UNITS}
@@ -785,11 +797,7 @@ class SolisSolaxModbusInverter(SolisInverter):
         return times | current | target_soc
 
     def _set_times(self, direction, **times) -> bool:
-        # Required if the times are set as separate_hours and units
         value_changed = False
-
-        # Solis inverters can't cope with time slots spanning midnight so if the end is a different day
-        # crop it to 23:59
 
         if times["end"] is not None:
             if times["start"] is None:
@@ -797,18 +805,17 @@ class SolisSolaxModbusInverter(SolisInverter):
             else:
                 start_day = times["start"].day
 
-            # if times["end"].day != times["start"].day:
             if start_day != times["end"].day:
                 times["end"] = times["end"].floor("1D") - pd.Timedelta("1min")
 
         for limit in LIMITS:
             time = times.get(limit, None)
             if time is not None:
-                entity_id = self._host.config.get(f"id_timed_{direction}_{limit}_hours", None)
+                entity_id = self.brand_config.get(f"id_timed_{direction}_{limit}_hours", None)
                 if entity_id is not None:
                     changed, written = self.write_to_hass(entity_id=entity_id, value=time.hour, verbose=True)
                     value_changed = value_changed or (changed and written)
-                entity_id = self._host.config.get(f"id_timed_{direction}_{limit}_minutes", None)
+                entity_id = self.brand_config.get(f"id_timed_{direction}_{limit}_minutes", None)
                 if entity_id is not None:
                     changed, written = self.write_to_hass(entity_id=entity_id, value=time.minute, verbose=True)
                     value_changed = value_changed or (changed and written)
@@ -885,7 +892,6 @@ class SolisCoreModbusInverter(SolisInverter):
         return changed, written
 
     def _get_times_current(self, direction):
-        # Required if the times are set as separate_hours and units
         times = {}
         for limit in LIMITS:
             x = {unit: self.get_config(f"id_timed_{direction}_{limit}_{unit}", 0) for unit in TIME_UNITS}
@@ -899,7 +905,6 @@ class SolisCoreModbusInverter(SolisInverter):
         return times | current | target_soc
 
     def _set_times(self, direction, **times) -> bool:
-        # Required if the times are set as separate_hours and units
         value_changed = False
         for limit in LIMITS:
             time = times.get(limit, None)
@@ -937,104 +942,145 @@ class SolisSolarmanModbusInverter(SolisInverter):
             written = True
 
 
-class SolisPho3nixModbus(SolisSolaxModbusInverter):
+# --- NEW CODE START ---
+class SolisPho3nixModbus(SolisInverter):
     """
     Inverter controller for the pho3nix90/solis_modbus integration.
-    This integration differs from wills106/homeassistant-solax-modbus by:
-    1. Using `time.set_value` service instead of number/button entities.
-    2. Requiring "Timed Charge/Discharge" (Code 35) to be active.
+    This integration uses "Time of Use Grid Charging" which is controlled
+    by a switch, and does not require changing the inverter's primary operating mode.
     """
 
     def __init__(self, inverter_type, host):
-        # Initialize the parent class (SolisSolaxModbusInverter)
         super().__init__(inverter_type, host)
-        self.app.log("SolisPho3nixModbus driver initialised.")
-
-        # Override the HMI flag from the parent.
-        # We know this integration *must* use Code 35 ("Timed Charge/Discharge")
-        # which is what hmi_firmware_fb00_plus = False enables.
-        self._hmi_fb00 = False
-        self.log(f"HMI Firmware Flag forced to {self._hmi_fb00} for this driver.")
-
-        # This integration does not use a "submit" button.
+        self.log("SolisPho3nixModbus driver initialised.")
         self._requires_button_press = False
+        self._hmi_fb00 = False
+
+    def _control_charge_discharge(self, direction, enable, **kwargs):
+        """
+        Controls the "Time of Use Grid Charging" functionality.
+        This method completely overrides the parent's _control_charge_discharge method.
+        """
+        if direction != "charge":
+            self.log(f"SolisPho3nixModbus does not support timed {direction}. Ignoring.")
+            return
+
+        switch_entity = self.brand_config.get("id_timed_charge_switch")
+        if not switch_entity:
+            self.log("Missing id_timed_charge_switch in config for TOU charging.", level="ERROR")
+            return
+
+        if enable:
+            if not all(k in kwargs for k in ("start", "end")):
+                self.log("control_charge(enable=True) called without start or end time.", level="ERROR")
+                return
+
+            self.log("Enabling Time of Use Grid Charging.")
+            times = {"start": kwargs["start"], "end": kwargs["end"]}
+            self._set_times("charge", **times)
+
+            # Prioritize 'current' from kwargs, fallback to 'power'
+            current = kwargs.get("current")
+            if current is None:
+                current = abs(round(kwargs.get("power", 0) / self.voltage, 1))
+            
+            # Apply the battery charge limit
+            battery_current_limit = self.get_config("battery_current_limit_amps", 50)
+            if current > battery_current_limit:
+                self.log(f"Requested charge current {current}A is above limit of {battery_current_limit}A. Capping.")
+                current = battery_current_limit
+
+            self.log(f"Setting charge current to {current}A")
+            self._set_current("charge", current)
+
+            self.log(f"Turning ON charge switch: {switch_entity}")
+            try:
+                self._host.call_service("switch/turn_on", entity_id=switch_entity)
+            except Exception as e:
+                self.log(f"Error turning ON {switch_entity}: {e}", level="ERROR")
+        else:
+            self.log("Disabling Time of Use Grid Charging.")
+            self.log(f"Turning OFF charge switch: {switch_entity}")
+            try:
+                self._host.call_service("switch/turn_off", entity_id=switch_entity)
+            except Exception as e:
+                self.log(f"Error turning OFF {switch_entity}: {e}", level="ERROR")
+            
+            self.log("Setting charge current to 0A for safety.")
+            self._set_current("charge", 0)
 
     def enable_timed_mode(self):
-        """
-        Forces the inverter into "Timed Charge/Discharge" (Code 35).
-        This is required for the pho3nix90 integration to work.
-        """
-        mode = self.modes.get("Timed Charge/Discharge")
-        if mode:
-            self.app.log(f"Setting inverter mode to 'Timed Charge/Discharge' ({mode})")
-            self.app.select_option(self.mode_control_entity, mode)
-        else:
-            self.app.log(
-                "Could not find 'Timed Charge/Discharge' mode in modes list",
-                level="ERROR",
-            )
+        """NO-OP. This driver manages charging directly."""
+        self.log("SolisPho3nixModbus: enable_timed_mode call ignored.")
+        pass
 
     def disable_timed_mode(self):
+        """NO-OP. This driver manages charging directly."""
+        self.log("SolisPho3nixModbus: disable_timed_mode call ignored.")
+        pass
+
+    def _set_current(self, direction, current: float = 0) -> bool:
         """
-        Sets the inverter back to "Self-Use" (Code 33).
+        Sets the inverter charge current using the `number.set_value` service.
+        This overrides the parent's _set_current method to avoid polling.
         """
-        mode = self.modes.get("Self-Use")
-        if mode:
-            self.app.log(f"Setting inverter mode to 'Self-Use' ({mode})")
-            self.app.select_option(self.mode_control_entity, mode)
-        else:
-            self.app.log(
-                "Could not find 'Self-Use' mode in modes list", level="ERROR"
-            )
+        entity_id = self.brand_config.get(f"id_timed_{direction}_current")
+        if not entity_id:
+            self.log(f"Missing id_timed_{direction}_current in config!", level="ERROR")
+            return False
+
+        current = round(current, 1)
+
+        try:
+            current_state = float(self._host.get_state_retry(entity_id))
+            if abs(current_state - current) < 0.1:
+                self.log(f"Inverter already at correct current ({current}A).")
+                return True
+        except (ValueError, TypeError):
+            self.log(f"Could not get current state for {entity_id}, proceeding to set it.")
+            pass
+
+        try:
+            self.log(f"Calling number/set_value on {entity_id} with {current}")
+            self._host.call_service("number/set_value", entity_id=entity_id, value=current)
+            self.log(f"Current {current}A write command sent to inverter.")
+            return True
+        except Exception as e:
+            self.log(f"ERROR setting charge current via number.set_value: {e}", level="ERROR")
+            return False
 
     def _set_times(self, direction, **times) -> bool:
         """
-        Sets the inverter charge/discharge times using the `time.set_value` service,
-        which is used by the pho3nix90/solis_modbus integration.
+        Sets the inverter charge/discharge times using the `time.set_value` service.
         """
-        value_changed = False
-        start_time = times.get("start", None)
-        end_time = times.get("end", None)
+        start_time = times.get("start")
+        end_time = times.get("end")
 
         if start_time is None or end_time is None:
-            self.app.log(f"Missing start or end time for _set_times in {direction}", level="WARNING")
+            self.log(f"Missing start or end time for _set_times in {direction}", level="ERROR")
             return False
 
-        # Solis inverters can't cope with time slots spanning midnight
         if start_time.day != end_time.day:
             end_time = end_time.floor("1D") - pd.Timedelta("1min")
 
+        start_entity = self.brand_config.get(f"id_timed_{direction}_start")
+        end_entity = self.brand_config.get(f"id_timed_{direction}_end")
+
+        if not (start_entity and end_entity):
+            self.log(f"Missing time entities for {direction} in config!", level="ERROR")
+            return False
+
         try:
-            # --- This is the key change ---
-            # Convert to HH:MM:SS strings
             start_time_str = start_time.strftime("%H:%M:%S")
             end_time_str = end_time.strftime("%H:%M:%S")
 
-            # Get the entity IDs (e.g., time.solis_timed_charge_start)
-            start_entity = self._host.config.get(f"id_timed_{direction}_start", None)
-            end_entity = self._host.config.get(f"id_timed_{direction}_end", None)
+            self.log(f"Calling time/set_value on {start_entity} with {start_time_str}")
+            self._host.call_service("time/set_value", entity_id=start_entity, time=start_time_str)
 
-            if not (start_entity and end_entity):
-                self.app.log(f"Missing time entities for {direction} in config!", level="ERROR")
-                return False
-
-            self.app.log(f"Calling time/set_value on {start_entity} with {start_time_str}")
-            changed_start, written_start = self.write_to_hass(
-                entity_id=start_entity, value=start_time_str, verbose=True
-            )
-
-            self.app.log(f"Calling time/set_value on {end_entity} with {end_time_str}")
-            changed_end, written_end = self.write_to_hass(
-                entity_id=end_entity, value=end_time_str, verbose=True
-            )
-
-            value_changed = (changed_start and written_start) or (changed_end and written_end)
-
+            self.log(f"Calling time/set_value on {end_entity} with {end_time_str}")
+            self._host.call_service("time/set_value", entity_id=end_entity, time=end_time_str)
+            return True
         except Exception as e:
-            self.app.log(
-                f"ERROR setting charge time via time.set_value: {e}. "
-                f"Check config for id_timed_{direction}_start/end.",
-                level="ERROR",
-            )
-
-        return value_changed
+            self.log(f"ERROR setting charge time via time.set_value: {e}", level="ERROR")
+            return False
+# --- NEW CODE END ---

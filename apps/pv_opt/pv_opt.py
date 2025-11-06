@@ -59,7 +59,7 @@ REDACT_REGEX = [
     "[a-zA-Z0-9]{10}_[0-9]{13}",  # MeterSerial_MPAN
     "[0-9]{2}m[0-9]{7}",  # Serial
     "[0-9]{2}e[0-9]{7}",  # Serial
-    "^$|\d{13}$",  # MPAN
+    r"^$|\d{13}$",  # MPAN
     "a_[0-f]{8}",  # Account Number
     "A-[0-f]{8}",  # Account Number
     "sk_live_[a-zA-Z0-9]{24}",  # API
@@ -103,7 +103,7 @@ INVERTER_TYPES = [
     "SUNSYNK_SOLARSYNK2",
     "SOLAX_X1",
     "SOLIS_CLOUD",
-    "SOLIS_SOLARMAN_V2",
+    "SOLIS_PHO3NIX_MODBUS",
 ]
 
 SYSTEM_ARGS = [
@@ -866,8 +866,8 @@ class PVOpt(hass.Hass):
 
         # If Charging plan exists, convert dispatch start and end times to datetime format and append to df.
         if not df.empty:
-            df["start_dt"] = pd.to_datetime(df["start"])
-            df["end_dt"] = pd.to_datetime(df["end"])
+            df["start_dt"] = pd.to_datetime(df["start"], utc=True)
+            df["end_dt"] = pd.to_datetime(df["end"], utc=True)
             df["start_local"] = df["start_dt"].dt.tz_convert(self.tz)
             df["end_local"] = df["end_dt"].dt.tz_convert(self.tz)
 
@@ -1211,8 +1211,8 @@ class PVOpt(hass.Hass):
             self.log("Slots required for charge")
             self.log(f"\n{df.to_string()}")
 
-        df["start_dt"] = pd.to_datetime(df["start"])
-        df["end_dt"] = pd.to_datetime(df["end"])
+        df["start_dt"] = pd.to_datetime(df["start"], utc=True)
+        df["end_dt"] = pd.to_datetime(df["end"], utc=True)
         df["start_local"] = df["start_dt"].dt.tz_convert(self.tz)
         df["end_local"] = df["end_dt"].dt.tz_convert(self.tz)
 
@@ -1336,11 +1336,15 @@ class PVOpt(hass.Hass):
         if self.inverter_type in INVERTER_TYPES:
             inverter_brand = self.inverter_type.split("_")[0].lower()
             self.log(f"Inverter type: {self.inverter_type}: inverter module: {inverter_brand}.py")
-            if inverter_brand == "solis":
-                # for now only Solis uses the new setup
+
+            try:
+                # Try to use the modern factory function first
                 create_inverter_controller = importName(f"{inverter_brand}", "create_inverter_controller")
                 self.inverter = create_inverter_controller(inverter_type=self.inverter_type, host=self)
-            else:
+                self.log("Loaded inverter using create_inverter_controller factory.")
+            except KeyError:
+                # Fallback to the older class-based instantiation
+                self.log(f"create_inverter_controller not found for {inverter_brand}, falling back to InverterController class.")
                 InverterController = importName(f"{inverter_brand}", "InverterController")
                 self.inverter = InverterController(inverter_type=self.inverter_type, host=self)
 
@@ -1397,8 +1401,8 @@ class PVOpt(hass.Hass):
         )
 
     def _cost_actual(self, **kwargs):
-        start = kwargs.get("start", pd.Timestamp.now(tz="UTC").normalize())
-        end = kwargs.get("end", pd.Timestamp.now(tz="UTC"))
+        start = kwargs.get("start", pd.Timestamp.now(tz=self.tz).normalize()).tz_convert("UTC")
+        end = kwargs.get("end", pd.Timestamp.now(tz=self.tz)).tz_convert("UTC")
 
         if self.debug and "F" in self.debug_cat:
             self.log(
@@ -2435,64 +2439,14 @@ class PVOpt(hass.Hass):
         self.pv_system.static_flows = self.pv_system.static_flows[self.time_now.floor("30min") :].fillna(0)
         self.pv_system.static_flows.index = [self.time_now] + list(self.pv_system.static_flows.index[1:])
 
-        soc_now = self.get_config("id_battery_soc")
-        self.pv_system.initial_soc = soc_now
-        # soc_last_day = self.hass2df(self.config["id_battery_soc"], days=1, log=self.debug)
-        # if self.debug and "S" in self.debug_cat:
-        #     self.log(f">>> soc_now: {soc_now}")
-        #     self.log(f">>> soc_last_day: {soc_last_day}")
-        #     self.log(
-        #         f">>> Original: {soc_last_day.loc[soc_last_day.loc[: self.pv_system.static_flows.index[0]].index[-1] :]}"
-        #     )
+        soc_entity_id = self.config["id_battery_soc"]
+        soc_now = self.get_ha_value(soc_entity_id)
+        if soc_now is None:
+            self.log(f"Could not get a valid SOC from {soc_entity_id}. Aborting optimisation.", level="ERROR")
+            self.status(f"ERROR: No SOC from {soc_entity_id}")
+            return
 
-        # try:
-        #     soc_now = float(soc_now)
-
-        # except:
-        #     self.log("")
-        #     self.log(
-        #         "Unable to get current SOC from HASS. Using last value from History.",
-        #         level="WARNING",
-        #     )
-        #     soc_now = soc_last_day.iloc[-1]
-
-        # # x = x.astype(float)
-
-        # try:
-        #     soc_last_day = pd.to_numeric(soc_last_day, errors="coerce").interpolate()
-
-        #     soc_last_day = soc_last_day.loc[soc_last_day.loc[: self.pv_system.static_flows.index[0]].index[-1] :]
-        #     if self.debug and "S" in self.debug_cat:
-        #         self.log(
-        #             f">>> Fixed   : {soc_last_day.loc[soc_last_day.loc[: self.pv_system.static_flows.index[0]].index[-1] :]}"
-        #         )
-
-        #     soc_last_day = pd.concat(
-        #         [
-        #             soc_last_day,
-        #             pd.Series(
-        #                 data=[soc_now, nan],
-        #                 index=[self.time_now, self.pv_system.static_flows.index[0]],
-        #             ),
-        #         ]
-        #     ).sort_index()
-        #     self.pv_system.initial_soc = soc_last_day.interpolate().loc[self.pv_system.static_flows.index[0]]
-        # except:
-        #     self.pv_system.initial_soc = None
-
-        # if not isinstance(self.pv_system.initial_soc, float):
-        #     self.log("")
-        #     self.log(
-        #         "Unable to retrieve initial SOC - assuming it is the same as current SOC",
-        #         level="WARNING",
-        #     )
-        #     self.pv_system.initial_soc = soc_now
-
-        # self.pv_system.soc_now = (self.time_now, soc_now)
-
-        # self.log("")
-        # self.log(f"Initial SOC: {self.pv_system.initial_soc}")
-        # self.log(f"Current SOC: {self.pv_system.soc_now}")
+        self.pv_system.initial_soc = float(soc_now)
 
         start = self.pv_system.static_flows.index[0]
         end = self.pv_system.static_flows.index[-1]
@@ -2891,6 +2845,7 @@ class PVOpt(hass.Hass):
             inverter_update_count = 0
             while did_something and inverter_update_count < MAX_INVERTER_UPDATES:
                 inverter_update_count += 1
+                did_something = False
 
                 status = self.inverter.status
                 self._log_inverterstatus(status)
@@ -3067,9 +3022,6 @@ class PVOpt(hass.Hass):
 
                     else:
                         str_log = "No charge/discharge windows planned "
-
-                    # If the next slot isn't soon then just check that current status matches what we see:
-                    did_something = False
 
                     if status["charge"]["active"]:
                         str_log += " but inverter is charging. Disabling charge."
@@ -3555,9 +3507,11 @@ class PVOpt(hass.Hass):
         )
 
     def _write_output(self):
-        if self.get_config("id_consumption_today") > 0:
+        consumption_entity = self.config.get("id_consumption_today")
+        consumption_today = float(self.get_ha_value(consumption_entity) or 0)
+        if consumption_today > 0:
             unit_cost_today = round(
-                self._cost_actual().sum() / self.get_config("id_consumption_today"),
+                self._cost_actual().sum() / consumption_today,
                 1,
             )
         else:
@@ -3826,7 +3780,7 @@ class PVOpt(hass.Hass):
                 self.log(f"kWh data from {entity_id} is")
                 self.log(f"\n{df.to_string()}")
 
-            df.index = pd.to_datetime(df.index)
+            df.index = pd.to_datetime(df.index, utc=True)
             x = df.diff().clip(0).fillna(0).cumsum() + df.iloc[0]
             x.index = x.index.round("1s")
             x = x[~x.index.duplicated()]
@@ -4096,7 +4050,7 @@ class PVOpt(hass.Hass):
                 else:
                     self.log("  - FAILED")
             self.log("")
-        return df
+            return df
 
     def _compare_tariffs(self):
         self.status("Comparing Tariffs")
@@ -4548,3 +4502,4 @@ class PVOpt(hass.Hass):
 
 
 # %%
+""

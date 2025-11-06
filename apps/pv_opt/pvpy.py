@@ -59,7 +59,6 @@ BOTTLECAP_DAVE = {
 # Calls "get octopus" to load the pricing information
 # outputs self.unit.
 
-
 def get_dt_hours(df: pd.DataFrame | pd.Series) -> pd.Series:
     df = pd.DataFrame(df)
     df["dt_hours"] = -df.index.diff(-1) / pd.Timedelta("60min")
@@ -255,7 +254,7 @@ class Tariff:
                 [pd.DataFrame(x).set_index("valid_from")["value_inc_vat"] for x in [self.day, self.night]],
                 axis=1,
             ).set_axis(["unit", "Night"], axis=1)
-            df.index = pd.to_datetime(df.index)
+            df.index = pd.to_datetime(df.index, utc=True)
             df = df.sort_index()
             df = df.reindex(
                 index=pd.date_range(
@@ -292,7 +291,7 @@ class Tariff:
 
         else:
             df = pd.DataFrame(self.unit).set_index("valid_from")["value_inc_vat"]
-            df.index = pd.to_datetime(df.index)
+            df.index = pd.to_datetime(df.index, utc=True)
             df = df.sort_index()
             if "AGILE" in self.name and use_day_ahead:
                 if self.agile_predict is None:
@@ -354,7 +353,7 @@ class Tariff:
         if not self.export:
             if not self.manual:
                 x = pd.DataFrame(self.fixed).set_index("valid_from")["value_inc_vat"].sort_index()
-                x.index = pd.to_datetime(x.index)
+                x.index = pd.to_datetime(x.index, utc=True)
                 newindex = pd.date_range(x.index[0], df.index[-1], freq="30min")
                 x = x.reindex(newindex).sort_index()
                 x = x.ffill().loc[df.index[0] :]
@@ -616,7 +615,7 @@ class Contract:
                 self.rlog(f"Getting details for MPAN {mpan['mpan']}")
                 df = pd.DataFrame(mpan["agreements"])
                 df = df.set_index("valid_from")
-                df.index = pd.to_datetime(df.index)
+                df.index = pd.to_datetime(df.index, utc=True)
                 df = df.sort_index()
                 tariff_code = df["tariff_code"].iloc[-1]
 
