@@ -8,6 +8,7 @@ The application will integrate fully with Solis inverters which are controlled u
 -   [Home Assistant Core Modbus Integration](https://github.com/fboundy/ha_solis_modbus)
 -   [Home Assistant Solis Sensor Integration](https://github.com/hultenvp/solis-sensor)
 -   [Home Assistant Solarman Integration](https://github.com/davidrapan/ha-solarman) (1)
+-   [Home Assistant Solis Modbus Integration](https://github.com/Pho3niX90/solis_modbus)
 
 (1) https://github.com/StephanJoubert/home_assistant_solarman appears to be no longer maintained so has been replaced with
 https://github.com/davidrapan/ha-solarman. This should be used for new installs for PvOpt v4.0.0 onwards.
@@ -113,6 +114,10 @@ https://github.com/fboundy/pv_opt/blob/main/files/solis_hybrid.yaml
 
 Note: installs using https://github.com/StephanJoubert/home_assistant_solarman have writes to the inverter disabled. For full inverter control, reinstall using the Solarman repo
 above.
+
+<h4>Pho3niX90 solis-modbus</h4>
+
+Follow Github instruction here: https://github.com/Pho3niX90/solis_modbus
 
 <h3>6. Install the MQTT Integraion in Home Assistant</h3>
 
