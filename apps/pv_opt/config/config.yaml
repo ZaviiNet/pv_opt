@@ -74,6 +74,8 @@ pv_opt:
   #   database: pv_opt
   #   token: !secret influx_token
   #   org: !secret influx_org
+  #   username: !secret influx_username
+  #   password: !secret influx_password
   #
   #   # For SQLite (path is optional, defaults to a file in the app directory)
   #   # database: /config/appdaemon/apps/pv_opt/pv_opt.db

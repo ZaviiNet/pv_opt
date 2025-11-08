@@ -380,6 +380,7 @@ InfluxDB is a powerful time-series database perfect for handling the data from P
 
 1.  **Configure `config.yaml`:**
 
+    For **InfluxDB v2.x** (token authentication):
     ```yaml
     database:
       enabled: true
@@ -389,6 +390,18 @@ InfluxDB is a powerful time-series database perfect for handling the data from P
       database: pv_opt # Your InfluxDB bucket name
       token: !secret influx_token # Your InfluxDB token
       org: !secret influx_org # Your InfluxDB organization
+    ```
+
+    For **InfluxDB v1.x** (username/password authentication):
+    ```yaml
+    database:
+      enabled: true
+      type: influxdb
+      host: core-influxdb
+      port: 8086
+      database: pv_opt # Your InfluxDB database name
+      username: !secret influx_username
+      password: !secret influx_password
     ```
 
 2.  **Add Python Package:** You must also add the `influxdb-client` package to your AppDaemon configuration. In the AppDaemon Add-on configuration, under "Edit in YAML", add it to `python_packages`:

@@ -200,6 +200,11 @@ DEFAULT_CONFIG = {
         "name": "Test",
         "domain": "button",
     },
+    "reset_cost_data": {
+        "default": pd.Timestamp.now(tz="UTC"),
+        "name": "Reset Cost Data",
+        "domain": "button",
+    },
     "solcast_confidence_level": {
         "default": 50,
         "attributes": {
@@ -551,10 +556,22 @@ class DatabaseManager:
                 from influxdb_client import InfluxDBClient
                 from influxdb_client.client.write_api import SYNCHRONOUS
 
+                org = None
+                token = self.config.get("token")
+                # If no token, fall back to username/password for InfluxDB v1.x
+                if not token:
+                    username = self.config.get("username")
+                    password = self.config.get("password")
+                    if username and password:
+                        # For v1 auth, org must be an empty string
+                        org = ""
+                        token = f"{username}:{password}"
+                        self.host.log("Using InfluxDB v1 username/password authentication.")
+                else: # It's a v2 token, so we need the org
+                    org = self.config.get("org") # Get org from config for v2
+
                 self.client = InfluxDBClient(
-                    url=f"http://{self.config['host']}:{self.config['port']}",
-                    token=self.config.get("token"),
-                    org=self.config.get("org")
+                    url=f"http://{self.config['host']}:{self.config['port']}", token=token, org=org
                 )
                 self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
                 self.query_api = self.client.query_api()
@@ -576,7 +593,7 @@ class DatabaseManager:
             self.host.log(f"Database type '{db_type}' is not yet supported.", level="WARNING")
 
     def write_df(self, measurement, df, tags={}):
-        if not self.write_api:
+        if not self.client:
             return
 
         db_type = self.config.get("type")
@@ -2268,6 +2285,7 @@ class PVOpt(hass.Hass):
                         "object_id": id,
                         "unique_id": id,
                     }
+                    | {"retain": False}
                     | attributes
                     | MQTT_CONFIGS.get(domain, {})
                 )
@@ -3587,27 +3605,35 @@ class PVOpt(hass.Hass):
 
         state = round((cost["cost"].sum()) / 100, 2)
 
-        attributes = (
-            {
-                "friendly_name": name,
-                "device_class": "monetary",
-                "state_class": "measurement",
-                "unit_of_measurement": "GBP",
-                "cost_today": round(
-                    (cost["cost"].loc[: midnight - pd.Timedelta(30, "minutes")].sum()) / 100,
-                    2,
-                ),
-                "cost_tomorrow": round((cost["cost"].loc[midnight:].sum()) / 100, 2),
-            }
-            | {col: df[["period_start", col]].to_dict("records") for col in cols if col in df.columns}
-            | {"cost": cost[["period_start", "cumulative_cost"]].to_dict("records")}
-            | attributes
-        )
+        # Base attributes that are always present
+        base_attributes = {
+            "friendly_name": name,
+            "device_class": "monetary",
+            "state_class": "measurement",
+            "unit_of_measurement": "GBP",
+            "cost_today": round(
+                (cost["cost"].loc[: midnight - pd.Timedelta(30, "minutes")].sum()) / 100,
+                2,
+            ),
+            "cost_tomorrow": round((cost["cost"].loc[midnight:].sum()) / 100, 2),
+        }
+
+        # If database is enabled, write full data to DB and keep attributes minimal
+        if self.db_manager and self.db_manager.client:
+            db_df = pd.concat([df, cost], axis=1)
+            self.db_manager.write_df(name.replace(" ", "_").lower(), db_df)
+            # Only include base attributes
+            final_attributes = base_attributes | attributes
+        else:
+            # If no database, include all the detailed data in the attributes
+            detailed_attributes = {col: df[["period_start", col]].to_dict("records") for col in cols if col in df.columns}
+            detailed_attributes["cost"] = cost[["period_start", "cumulative_cost"]].to_dict("records")
+            final_attributes = base_attributes | detailed_attributes | attributes
 
         self.write_to_hass(
             entity=entity,
             state=state,
-            attributes=attributes,
+            attributes=final_attributes,
         )
 
     def _write_output(self):
