@@ -4,7 +4,9 @@ pv_opt:
   module: pv_opt
   class: PVOpt
 
-  log: pv_opt_log
+  # Uncomment the line below if you have defined pv_opt_log in appdaemon.yaml (see README).
+  # If pv_opt_log is not defined in appdaemon.yaml, leaving this enabled causes a startup crash.
+  # log: pv_opt_log
   prefix: pvopt
   debug: false
 
