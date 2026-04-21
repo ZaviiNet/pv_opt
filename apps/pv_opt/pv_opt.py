@@ -1953,7 +1953,7 @@ class PVOpt(hass.Hass):
 
         # ── 1. Discover the calendar entity ──────────────────────────────────
         calendar_entity = next(
-            (name for name in self.get_state_retry("calendar").keys() if "octoplus_saving_sessions" in name),
+            (name for name in (self.get_state_retry("calendar") or {}).keys() if "octoplus_saving_sessions" in name),
             None,
         )
 
@@ -2082,7 +2082,7 @@ class PVOpt(hass.Hass):
 
         # ── 1. Discover the calendar entity ──────────────────────────────────
         calendar_entity = next(
-            (name for name in self.get_state_retry("calendar").keys() if "octoplus_free_electricity_session" in name),
+            (name for name in (self.get_state_retry("calendar") or {}).keys() if "octoplus_free_electricity_session" in name),
             None,
         )
 
